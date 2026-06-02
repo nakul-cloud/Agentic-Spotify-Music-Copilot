@@ -1,5 +1,11 @@
-from fastmcp import FastMCP
 
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).resolve().parents[2]
+sys.path.append(str(project_root))
+
+from fastmcp import FastMCP
 from src.services.spotify_search import search_tracks
 
 mcp = FastMCP("Spotify Copilot")
