@@ -66,7 +66,7 @@ This project focuses on learning and demonstrating:
 ## Example User Requests
 
 ```text
-Search Afro House tracks released after 2024
+Search Pop tracks released after 2024
 ```
 
 ```text
