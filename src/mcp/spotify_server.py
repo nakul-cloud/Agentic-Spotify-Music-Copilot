@@ -1,14 +1,16 @@
 from fastmcp import FastMCP
 
+from src.services.spotify_search import search_tracks
+
 mcp = FastMCP("Spotify Copilot")
 
 
 @mcp.tool()
-def hello_spotify(name: str) -> str:
+def search_tracks_tool(query: str):
     """
-    Test MCP tool.
+    Search Spotify tracks.
     """
-    return f"Hello {name}, MCP is working!"
+    return search_tracks(query)
 
 
 if __name__ == "__main__":
