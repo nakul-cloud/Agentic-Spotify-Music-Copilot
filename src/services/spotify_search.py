@@ -7,15 +7,27 @@ from src.utils.config import (
 )
 
 
-sp = spotipy.Spotify(
-    auth_manager=SpotifyClientCredentials(
-        client_id=SPOTIFY_CLIENT_ID,
-        client_secret=SPOTIFY_CLIENT_SECRET
+def _require_credentials():
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+        raise ValueError(
+            "Missing Spotify credentials. Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET."
+        )
+
+
+def get_spotify_client():
+    _require_credentials()
+    return spotipy.Spotify(
+        auth_manager=SpotifyClientCredentials(
+            client_id=SPOTIFY_CLIENT_ID,
+            client_secret=SPOTIFY_CLIENT_SECRET
+        ),
+        requests_timeout=10
     )
-)
 
 
 def search_tracks(query: str, limit: int = 5):
+    sp = get_spotify_client()
+
     results = sp.search(
         q=query,
         type="track",
