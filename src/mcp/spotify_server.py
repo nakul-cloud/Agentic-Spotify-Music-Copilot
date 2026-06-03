@@ -14,7 +14,7 @@ mcp = FastMCP("Spotify Copilot")
 @mcp.tool()
 def search_tracks_tool(query: str):
     """
-    Search Spotify tracks.
+    Search Spotify tracks by keyword.
     """
     return search_tracks(query)
 
