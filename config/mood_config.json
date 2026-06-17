@@ -1,0 +1,58 @@
+{
+  "moods": {
+    "happy": ["happy", "joy", "cheerful", "glad", "bright", "good vibes", "upbeat", "smile", "sunset"],
+    "sad": ["sad", "depressed", "cry", "melancholy", "gloomy", "heartbroken", "down", "sorrow", "rainy"],
+    "focus": ["focus", "study", "concentration", "work", "coding", "learn", "deep work", "read", "ambient"],
+    "workout": ["workout", "gym", "run", "exercise", "training", "cardio", "lifting", "energetic", "pumped"],
+    "chill": ["chill", "relax", "calm", "smooth", "lounge", "sleep", "rest", "peaceful", "sunset"],
+    "party": ["party", "dance", "club", "celebrate", "weekend", "groove", "rave", "nightlife", "house", "techno"],
+    "driving": ["driving", "drive", "road trip", "car", "cruise", "highway", "travel", "sunset"]
+  },
+  "mood_genres": {
+    "happy": "pop",
+    "sad": "acoustic",
+    "focus": "ambient",
+    "workout": "edm",
+    "chill": "ambient",
+    "party": "dance",
+    "driving": "rock"
+  },
+  "mood_scoring": {
+    "happy": {
+      "valence": 0.5,
+      "energy": 0.5
+    },
+    "sad": {
+      "valence": -0.5,
+      "energy": -0.5
+    },
+    "focus": {
+      "energy": -0.5,
+      "acousticness": 0.5
+    },
+    "workout": {
+      "energy": 0.5,
+      "tempo": {
+        "weight": 0.5,
+        "max_val": 180.0
+      }
+    },
+    "chill": {
+      "energy": -0.5,
+      "valence": 0.5
+    },
+    "party": {
+      "danceability": 0.5,
+      "energy": 0.5
+    },
+    "driving": {
+      "energy": 0.5,
+      "tempo": {
+        "weight": 0.5,
+        "max_val": 150.0
+      }
+    }
+  },
+  "popularity_weight": 0.4,
+  "mood_weight": 0.6
+}

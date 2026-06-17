@@ -1,0 +1,11 @@
+.venv/
+.env
+.cache
+graphify-out/
+__pycache__/
+.pytest_cache/
+.vscode/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
