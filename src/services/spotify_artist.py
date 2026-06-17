@@ -32,7 +32,13 @@ def get_artist_top_tracks(artist_name: str, market: str = "US"):
         }
 
     artist_id = items[0].get("id")
-    top_tracks = sp.artist_top_tracks(artist_id, country=market).get("tracks", [])
+    actual_name = items[0].get("name", artist_name)
+    try:
+        top_tracks = sp.artist_top_tracks(artist_id, country=market).get("tracks", [])
+    except Exception as e:
+        # Fallback to search query for tracks by this artist if top tracks returns 403/Forbidden
+        search_res = sp.search(q=f"artist:{actual_name}", type="track", limit=10)
+        top_tracks = search_res.get("tracks", {}).get("items", [])
 
     return [
         {

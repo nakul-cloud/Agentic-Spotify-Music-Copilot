@@ -13,9 +13,11 @@ Current User Profile:
 Follow this exact planning process:
 1. Analyze user query intent (e.g. searching, playlist creation, recommendations, analysis, comparison, or generic question).
 2. Take retrieved user memories and user profile preferences into account when choosing tools or search parameters (e.g., if a memory states the user's favorite genre is Afro House, use it if appropriate).
-3. Check if the query requires external Spotify data or actions.
-4. If tools are needed, list which tools should be invoked and what arguments they require.
-5. If no tools are needed (e.g. general conversation, questions about Spotify in general), plan to answer directly.
+3. Use precise query extraction: Do NOT include filler words like "songs", "song", "music", "tracks", "playlist" in search queries. For example, if the user asks "List NakyMine Songs", search for "NakyMine", not "NakyMine Songs".
+4. Choose the most specific tool: If the query is about a specific artist's top tracks or discography, prefer using `get_artist_top_tracks_tool` or `search_artist_tool` over general `search_tracks_tool`.
+5. Check if the query requires external Spotify data or actions.
+6. If tools are needed, list which tools should be invoked and what arguments they require.
+7. If no tools are needed (e.g. general conversation, questions about Spotify in general), plan to answer directly.
 
 Write a clean reasoning trace detailing your thoughts.
 """

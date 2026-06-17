@@ -30,6 +30,47 @@ llm_with_tools = llm.bind_tools(ALL_TOOLS)
 memory_store = QdrantMemoryStore(location="localhost", port=6333)
 
 
+def timed_node(node_name):
+    def decorator(func):
+        def wrapper(state: AgentState) -> AgentState:
+            start_time = time.time()
+            metadata = dict(state.get("metadata", {})) if state.get("metadata") is not None else {}
+            if "execution_trace" not in metadata:
+                metadata["execution_trace"] = []
+            try:
+                res_state = func(state)
+                if res_state is None:
+                    res_state = dict(state)
+                else:
+                    res_state = dict(res_state)
+                end_time = time.time()
+                metadata["execution_trace"].append({
+                    "node": node_name,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "duration": round(end_time - start_time, 3),
+                    "status": "success",
+                    "error": None
+                })
+                res_state["metadata"] = metadata
+                return res_state
+            except Exception as e:
+                end_time = time.time()
+                metadata["execution_trace"].append({
+                    "node": node_name,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "duration": round(end_time - start_time, 3),
+                    "status": "error",
+                    "error": str(e)
+                })
+                new_state = dict(state)
+                new_state["metadata"] = metadata
+                raise e
+        return wrapper
+    return decorator
+
+@timed_node("planner_node")
 def planner_node(state: AgentState) -> AgentState:
     """
     Analyzes user intent, logs reasoning steps, and decides if any tool calls are required.
@@ -88,6 +129,7 @@ def planner_node(state: AgentState) -> AgentState:
             "selected_tools": []
         }
 
+@timed_node("tool_executor")
 def tool_executor(state: AgentState) -> AgentState:
     """
     Executes the tools identified by the planner node.
@@ -97,6 +139,8 @@ def tool_executor(state: AgentState) -> AgentState:
     tool_results = list(state.get("tool_results", []))
     messages = list(state.get("messages", []))
     reasoning_steps = list(state.get("reasoning_steps", []))
+    metadata = dict(state.get("metadata", {})) if state.get("metadata") is not None else {}
+    tool_traces = list(metadata.get("tool_traces", []))
     
     for tool_call in tool_calls:
         tool_name = tool_call["name"]
@@ -104,6 +148,9 @@ def tool_executor(state: AgentState) -> AgentState:
         tool_id = tool_call["id"]
         
         reasoning_steps.append(f"Executing tool '{tool_name}' with args {tool_args}")
+        tool_start = time.time()
+        status = "success"
+        error_msg = None
         
         if tool_name in TOOLS_BY_NAME:
             tool_func = TOOLS_BY_NAME[tool_name]
@@ -115,11 +162,24 @@ def tool_executor(state: AgentState) -> AgentState:
                 LOGGER.error("[NODE: tool_executor] Tool '%s' failed: %s", tool_name, str(e))
                 result = {"error": f"Tool execution failed: {str(e)}"}
                 reasoning_steps.append(f"Tool '{tool_name}' failed: {str(e)}")
+                status = "error"
+                error_msg = str(e)
         else:
             LOGGER.warning("[NODE: tool_executor] Unknown tool: %s", tool_name)
             result = {"error": f"Unknown tool name: {tool_name}"}
             reasoning_steps.append(f"Tool execution skipped: Unknown tool '{tool_name}'")
+            status = "error"
+            error_msg = f"Unknown tool: {tool_name}"
             
+        tool_duration = round(time.time() - tool_start, 3)
+        tool_traces.append({
+            "tool": tool_name,
+            "start_time": tool_start,
+            "duration": tool_duration,
+            "status": status,
+            "error": error_msg
+        })
+        
         tool_results.append({
             "tool_name": tool_name,
             "args": tool_args,
@@ -133,13 +193,16 @@ def tool_executor(state: AgentState) -> AgentState:
             name=tool_name
         ))
         
+    metadata["tool_traces"] = tool_traces
     return {
         **state,
         "messages": messages,
         "tool_results": tool_results,
-        "reasoning_steps": reasoning_steps
+        "reasoning_steps": reasoning_steps,
+        "metadata": metadata
     }
 
+@timed_node("reasoning_node")
 def reasoning_node(state: AgentState) -> AgentState:
     """
     Synthesizes search results, track details, and playlists into a coherent explanation.
@@ -186,6 +249,7 @@ def reasoning_node(state: AgentState) -> AgentState:
             "final_response": fallback_content
         }
 
+@timed_node("response_node")
 def response_node(state: AgentState) -> AgentState:
     """
     Applies high-end visual markdown formatting and lists tools cited.
@@ -220,6 +284,7 @@ def response_node(state: AgentState) -> AgentState:
         "messages": state.get("messages", []) + [AIMessage(content=formatted_content)]
     }
 
+@timed_node("memory_retrieval_node")
 def memory_retrieval_node(state: AgentState) -> AgentState:
     """
     Retrieves semantic user memories from Qdrant and injects them along with the user profile.
@@ -246,6 +311,7 @@ def memory_retrieval_node(state: AgentState) -> AgentState:
 
 import json
 
+@timed_node("memory_update_node")
 def memory_update_node(state: AgentState) -> AgentState:
     """
     Evaluates the conversation context, extracts user preferences and profile updates,
