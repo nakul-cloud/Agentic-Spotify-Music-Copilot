@@ -1,10 +1,17 @@
 import os
+import time
 import logging
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_groq import ChatGroq
 from src.agent.state import AgentState
 from src.agent.tools import ALL_TOOLS, TOOLS_BY_NAME
-from src.agent.prompts import PLANNER_SYSTEM_PROMPT, REASONING_SYSTEM_PROMPT, RESPONSE_SYSTEM_PROMPT
+from src.agent.prompts import (
+    PLANNER_SYSTEM_PROMPT,
+    REASONING_SYSTEM_PROMPT,
+    RESPONSE_SYSTEM_PROMPT,
+    MEMORY_EXTRACTOR_PROMPT
+)
+from src.agent.memory import QdrantMemoryStore
 
 LOGGER = logging.getLogger(__name__)
 
@@ -19,6 +26,10 @@ llm = ChatGroq(
 # Bind tools globally - mandatory requirement
 llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
+# Initialize Qdrant Memory Store globally
+memory_store = QdrantMemoryStore(location="localhost", port=6333)
+
+
 def planner_node(state: AgentState) -> AgentState:
     """
     Analyzes user intent, logs reasoning steps, and decides if any tool calls are required.
@@ -29,7 +40,11 @@ def planner_node(state: AgentState) -> AgentState:
     
     # 1. Prepare tool descriptions for the planner prompt
     tool_descriptions = "\n".join([f"- {t.name}: {t.description}" for t in ALL_TOOLS])
-    system_content = PLANNER_SYSTEM_PROMPT.format(tool_descriptions=tool_descriptions)
+    system_content = PLANNER_SYSTEM_PROMPT.format(
+        tool_descriptions=tool_descriptions,
+        retrieved_memories=str(state.get("retrieved_memories", [])),
+        user_profile=str(state.get("user_profile", {}))
+    )
     
     # 3. Create context for the planner
     planner_messages = [
@@ -204,3 +219,100 @@ def response_node(state: AgentState) -> AgentState:
         "final_response": formatted_content,
         "messages": state.get("messages", []) + [AIMessage(content=formatted_content)]
     }
+
+def memory_retrieval_node(state: AgentState) -> AgentState:
+    """
+    Retrieves semantic user memories from Qdrant and injects them along with the user profile.
+    """
+    LOGGER.info("[NODE: memory_retrieval_node] Querying semantic memories...")
+    user_query = state.get("user_query")
+    session_id = state.get("session_id", "default")
+    
+    # 1. Search memory collection
+    memories = memory_store.search_memories(user_query, limit=5)
+    
+    # 2. Get user profile
+    profile = memory_store.get_profile(session_id)
+    
+    reasoning_steps = list(state.get("reasoning_steps", []))
+    reasoning_steps.append(f"Retrieved {len(memories)} semantic memories and loaded active user profile.")
+    
+    return {
+        **state,
+        "retrieved_memories": memories,
+        "user_profile": profile,
+        "reasoning_steps": reasoning_steps
+    }
+
+import json
+
+def memory_update_node(state: AgentState) -> AgentState:
+    """
+    Evaluates the conversation context, extracts user preferences and profile updates,
+    and upserts them to the Qdrant long-term memory store.
+    """
+    LOGGER.info("[NODE: memory_update_node] Evaluating conversation for memory extraction...")
+    user_query = state.get("user_query")
+    final_response = state.get("final_response")
+    session_id = state.get("session_id", "default")
+    reasoning_steps = list(state.get("reasoning_steps", []))
+    
+    # Context to evaluate
+    context = f"User Query: {user_query}\nAssistant Response: {final_response}"
+    
+    messages = [
+        SystemMessage(content=MEMORY_EXTRACTOR_PROMPT),
+        HumanMessage(content=context)
+    ]
+    
+    try:
+        response = llm.invoke(messages)
+        content = response.content.strip()
+        
+        # Clean JSON if wrapped in markdown code blocks
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+        
+        updates = json.loads(content)
+        
+        # 1. Persist new semantic memories
+        new_memories = updates.get("memories", [])
+        for memory in new_memories:
+            LOGGER.info("[MEMORY STORED] %s", memory)
+            memory_store.add_memory(session_id, memory, category="preference")
+            reasoning_steps.append(f"Stored long-term preference: '{memory}'")
+            
+        # 2. Update user profile
+        profile = memory_store.get_profile(session_id)
+        profile_updates = updates.get("profile_updates", {})
+        
+        # Merge lists
+        for k in ["favorite_genres", "favorite_artists", "favorite_moods"]:
+            if k in profile_updates and profile_updates[k]:
+                merged = list(set(profile.get(k, []) + profile_updates[k]))
+                profile[k] = merged
+                
+        # Update playlist history if user generated a playlist
+        selected_tools = state.get("selected_tools", [])
+        if "playlist_generation_tool" in selected_tools or "create_playlist_tool" in selected_tools:
+            profile["playlist_history"].append({
+                "query": user_query,
+                "timestamp": time.time()
+            })
+            
+        # Save updated profile
+        memory_store.save_profile(session_id, profile)
+        reasoning_steps.append("Updated and synchronized active user profile in vector DB.")
+        
+    except Exception as e:
+        LOGGER.error("[NODE: memory_update_node] Failed to extract/update memory: %s", str(e))
+        reasoning_steps.append(f"Memory update node warning: {str(e)}")
+        
+    return {
+        **state,
+        "reasoning_steps": reasoning_steps
+    }
+

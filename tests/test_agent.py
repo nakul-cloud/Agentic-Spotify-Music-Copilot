@@ -3,7 +3,14 @@ from unittest.mock import MagicMock, patch
 from langchain_core.messages import AIMessage, ToolMessage
 
 from src.agent.state import AgentState
-from src.agent.nodes import planner_node, tool_executor, reasoning_node, response_node
+from src.agent.nodes import (
+    planner_node,
+    tool_executor,
+    reasoning_node,
+    response_node,
+    memory_retrieval_node,
+    memory_update_node
+)
 from src.agent.graph import agent_graph
 
 
@@ -202,3 +209,71 @@ def test_full_graph_workflow_no_tools():
         # Verify flow reached the end and formatted final response
         assert "## 🎵 Spotify Music Copilot Response" in res["final_response"]
         assert "Spotify is a popular music streaming service." in res["final_response"]
+
+
+def test_memory_pipeline_integration():
+    session_id = "test_memory_session_123"
+    
+    # 1. Mock the LLM preference extractor response
+    mock_extractor_response = AIMessage(
+        content='''
+        {
+            "memories": ["User loves Afro House music"],
+            "profile_updates": {
+                "favorite_genres": ["afro house"],
+                "favorite_artists": [],
+                "favorite_moods": []
+            }
+        }
+        '''
+    )
+    
+    state: AgentState = {
+        "messages": [],
+        "user_query": "I love Afro House",
+        "tool_calls": [],
+        "tool_results": [],
+        "final_response": "I have noted your preference for Afro House music.",
+        "reasoning_steps": [],
+        "session_id": session_id,
+        "conversation_history": [],
+        "selected_tools": [],
+        "metadata": {},
+        "retrieved_memories": [],
+        "user_profile": {}
+    }
+    
+    with patch("src.agent.nodes.llm") as mock_llm:
+        mock_llm.invoke.return_value = mock_extractor_response
+        
+        # Run memory update
+        updated_state = memory_update_node(state)
+        assert "Stored long-term preference: 'User loves Afro House music'" in updated_state["reasoning_steps"]
+        
+    # 2. Verify retrieval in a subsequent turn
+    retrieval_state: AgentState = {
+        "messages": [],
+        "user_query": "What should I listen to?",
+        "tool_calls": [],
+        "tool_results": [],
+        "final_response": "",
+        "reasoning_steps": [],
+        "session_id": session_id,
+        "conversation_history": [],
+        "selected_tools": [],
+        "metadata": {},
+        "retrieved_memories": [],
+        "user_profile": {}
+    }
+    
+    retrieved_state = memory_retrieval_node(retrieval_state)
+    
+    # Check memories were successfully retrieved and profile was loaded
+    assert len(retrieved_state["retrieved_memories"]) > 0
+    assert retrieved_state["retrieved_memories"][0]["text"] == "User loves Afro House music"
+    assert "afro house" in retrieved_state["user_profile"]["favorite_genres"]
+    
+    # Clean up memory store for this session
+    from src.agent.nodes import memory_store
+    memory_store.clear(session_id)
+

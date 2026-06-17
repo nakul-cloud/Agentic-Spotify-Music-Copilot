@@ -12,3 +12,6 @@ class AgentState(TypedDict):
     conversation_history: List[BaseMessage]
     selected_tools: List[str]
     metadata: Dict[str, Any]
+    retrieved_memories: List[Dict[str, Any]]
+    user_profile: Dict[str, Any]
+
