@@ -141,12 +141,13 @@ def register_tools(mcp: FastMCP) -> list[str]:
         return detect_mood(user_text)
 
     @mcp.tool()
-    def playlist_generation_tool(prompt: str):
+    def playlist_generation_tool(prompt: str, mood: str = None, genre: str = None):
         """
         Generate a curated playlist structure (mood, genre, ranked tracks) from a prompt.
+        Allows optional mood and genre overrides.
         """
-        LOGGER.info("[MCP TOOL CALLED] Generate playlist structure for: %s", prompt)
-        return generate_playlist(prompt)
+        LOGGER.info("[MCP TOOL CALLED] Generate playlist structure for: %s (mood override: %s, genre override: %s)", prompt, mood, genre)
+        return generate_playlist(prompt, mood=mood, genre=genre)
 
     return [
         "search_tracks_tool",

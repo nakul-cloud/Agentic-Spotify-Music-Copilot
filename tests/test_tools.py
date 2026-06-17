@@ -74,3 +74,16 @@ def test_playlist_generation_workflow():
     assert "identified_genre" in res
     assert "tracks" in res
     assert isinstance(res["tracks"], list)
+
+
+@pytest.mark.integration
+def test_playlist_generation_overrides():
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET or "YOUR_CLIENT" in SPOTIFY_CLIENT_ID:
+        pytest.skip("Missing Spotify credentials")
+
+    res = generate_playlist("melodic dubstep", mood="workout", genre="dubstep")
+    assert res["detected_mood"] == "workout"
+    assert res["identified_genre"] == "dubstep"
+    assert "tracks" in res
+    assert isinstance(res["tracks"], list)
+

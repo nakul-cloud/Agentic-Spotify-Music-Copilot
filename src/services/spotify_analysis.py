@@ -272,55 +272,36 @@ def detect_mood(user_text: str):
     }
 
 
-def generate_playlist(prompt: str):
+def generate_playlist(prompt: str, mood: str = None, genre: str = None):
     """
-    Rule-based playlist generation pipeline:
-    1. Detect mood
-    2. Identify genre dynamically matching Spotify seed genres
-    3. Search tracks aligned with prompt
-    4. Rank tracks using audio features matching target mood criteria
+    Dynamic playlist generation pipeline:
+    1. Clean the user's prompt to construct a clean search query by removing stop words.
+    2. Search Spotify for tracks matching the cleaned query.
+    3. Dynamically extract the genre and mood from the returned tracks and their artists' metadata.
+    4. Rank the tracks using their audio features and popularity.
     """
     try:
-        # 1. Detect mood
-        mood_result = detect_mood(prompt)
-        mood = mood_result["detected_mood"]
-
-        # 2. Identify genre from prompt keywords dynamically using Spotify's seed genres
         sp = get_spotify_client()
-        from src.services.spotify_recommendations import _get_recommendation_genres
-        available_genres = _get_recommendation_genres(sp)
-
-        identified_genre = None
-        # Sort available_genres by length descending to match longer multi-word genres first
-        sorted_genres = sorted(list(available_genres), key=len, reverse=True)
-        for g in sorted_genres:
-            if g.lower() in prompt.lower():
-                identified_genre = g
-                break
-
-        # Fallback based on mood using configuration mapping
         config = _load_mood_config()
-        if not identified_genre:
-            mood_genres = config.get("mood_genres", {})
-            identified_genre = mood_genres.get(mood, "pop")
 
-        # 3. Search tracks
-        # Clean up prompt to create search query
-        search_query = prompt
-        for filler in ["create", "playlist", "a", "an", "for", "with", "sunset", "beach"]:
-            search_query = search_query.replace(f" {filler} ", " ")
+        # 1. Clean the search query dynamically using stop words from config
+        stop_words = config.get("stop_words", [])
+        words = prompt.lower().split()
+        cleaned_words = [w for w in words if w not in stop_words]
+        cleaned_query = " ".join(cleaned_words)
+        if not cleaned_query:
+            cleaned_query = prompt
 
-        results = sp.search(q=search_query, type="track", limit=10)
+        # 2. Search Spotify for matching tracks
+        results = sp.search(q=cleaned_query, type="track", limit=10)
         items = results.get("tracks", {}).get("items", [])
 
-        # Fallback: search by genre
-        if not items:
-            results = sp.search(q=f"genre:{identified_genre}", type="track", limit=10)
-            items = results.get("tracks", {}).get("items", [])
+        # 3. Dynamic genre and mood extraction
+        detected_mood = mood
+        identified_genre = genre
 
-        # 4. Rank tracks using audio features
-        ranked_tracks = []
         if items:
+            # Fetch audio features for all items
             track_ids = [item.get("id") for item in items if item.get("id")]
             try:
                 features_list = sp.audio_features(tracks=track_ids)
@@ -328,14 +309,113 @@ def generate_playlist(prompt: str):
                 LOGGER.warning("Audio features API failed during playlist generation (%s). Using fallback features.", str(e))
                 features_list = [None] * len(items)
 
+            # Ensure every item has feature details (fallback if None)
+            resolved_feats = []
             for item, feats in zip(items, features_list):
                 if not feats:
-                    # Generate deterministic fallback features
-                    fallback = _fallback_features(item.get("name", ""), item.get("id") or "")
-                    feats = fallback
+                    feats = _fallback_features(item.get("name", ""), item.get("id") or "")
+                resolved_feats.append(feats)
 
+            # A. Dynamic Mood Detection (if not overridden)
+            if not detected_mood:
+                avg_features = {
+                    "energy": 0.5,
+                    "danceability": 0.5,
+                    "valence": 0.5,
+                    "acousticness": 0.5,
+                    "tempo": 120.0
+                }
+                if resolved_feats:
+                    avg_features["energy"] = sum(f.get("energy", 0.5) or 0.5 for f in resolved_feats) / len(resolved_feats)
+                    avg_features["danceability"] = sum(f.get("danceability", 0.5) or 0.5 for f in resolved_feats) / len(resolved_feats)
+                    avg_features["valence"] = sum(f.get("valence", 0.5) or 0.5 for f in resolved_feats) / len(resolved_feats)
+                    avg_features["acousticness"] = sum(f.get("acousticness", 0.5) or 0.5 for f in resolved_feats) / len(resolved_feats)
+                    avg_features["tempo"] = sum(f.get("tempo", 120.0) or 120.0 for f in resolved_feats) / len(resolved_feats)
+
+                mood_scores = {}
+                for mood_name in config.get("mood_scoring", {}).keys():
+                    mood_scores[mood_name] = _calculate_mood_score(mood_name, avg_features, config)
+
+                if mood_scores:
+                    detected_mood = max(mood_scores, key=mood_scores.get)
+                else:
+                    detected_mood = "chill"
+
+            # B. Dynamic Genre Identification (if not overridden)
+            if not identified_genre:
+                # Collect artist IDs
+                artist_ids = []
+                for item in items:
+                    for artist in item.get("artists", []):
+                        art_id = artist.get("id")
+                        if art_id and art_id not in artist_ids:
+                            artist_ids.append(art_id)
+
+                # Fetch artist genres from Spotify API
+                artist_genres = []
+                if artist_ids:
+                    try:
+                        # Fetch in chunks of 50 just in case
+                        for i in range(0, len(artist_ids), 50):
+                            chunk = artist_ids[i:i+50]
+                            artists_data = sp.artists(chunk)
+                            for artist_info in artists_data.get("artists", []):
+                                if artist_info and artist_info.get("genres"):
+                                    artist_genres.extend(artist_info.get("genres"))
+                    except Exception as e:
+                        LOGGER.warning("Failed to fetch artist genres (%s)", str(e))
+
+                # Count frequencies matching official seed genres
+                from src.services.spotify_recommendations import _get_recommendation_genres
+                available_genres = _get_recommendation_genres(sp)
+
+                genre_counts = {}
+                for g in artist_genres:
+                    g_lower = g.lower()
+                    if g_lower in available_genres:
+                        genre_counts[g_lower] = genre_counts.get(g_lower, 0) + 1
+
+                if genre_counts:
+                    identified_genre = max(genre_counts, key=genre_counts.get)
+                else:
+                    # Fallback to the most common artist genre overall
+                    from collections import Counter
+                    all_genre_counts = Counter(artist_genres)
+                    if all_genre_counts:
+                        identified_genre = all_genre_counts.most_common(1)[0][0]
+                    else:
+                        # Fallback to config mapping
+                        mood_genres = config.get("mood_genres", {})
+                        identified_genre = mood_genres.get(detected_mood, "pop")
+        else:
+            # No items found via initial search -> Fallback to searching by genre or mood defaults
+            if not detected_mood:
+                detected_mood = mood or "chill"
+            if not identified_genre:
+                mood_genres = config.get("mood_genres", {})
+                identified_genre = genre or mood_genres.get(detected_mood, "pop")
+
+            # Fallback search by genre
+            results = sp.search(q=f"genre:{identified_genre}", type="track", limit=10)
+            items = results.get("tracks", {}).get("items", [])
+            resolved_feats = []
+            if items:
+                track_ids = [item.get("id") for item in items if item.get("id")]
+                try:
+                    features_list = sp.audio_features(tracks=track_ids)
+                except Exception as e:
+                    features_list = [None] * len(items)
+                for item, feats in zip(items, features_list):
+                    if not feats:
+                        feats = _fallback_features(item.get("name", ""), item.get("id") or "")
+                    resolved_feats.append(feats)
+
+        # 4. Rank tracks using audio features & popularity
+        ranked_tracks = []
+        if items:
+            for item, feats in zip(items, resolved_feats):
                 pop_score = (item.get("popularity", 0) or 0) / 100.0
-                mood_score = _calculate_mood_score(mood, feats, config)
+                mood_score = _calculate_mood_score(detected_mood, feats, config)
 
                 pop_weight = config.get("popularity_weight", 0.4)
                 mood_weight = config.get("mood_weight", 0.6)
@@ -355,11 +435,13 @@ def generate_playlist(prompt: str):
 
         return {
             "prompt": prompt,
-            "detected_mood": mood,
+            "detected_mood": detected_mood,
             "identified_genre": identified_genre,
             "tracks": ranked_tracks[:10]
         }
     except Exception as e:
         return {"error": f"Failed to generate playlist structure: {str(e)}"}
+
+
 
 
