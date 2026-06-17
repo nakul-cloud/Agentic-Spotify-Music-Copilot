@@ -56,9 +56,26 @@ def recommend_tracks_by_genre_tool(genre: str) -> list:
     return recommend_tracks_by_genre(genre)
 
 @tool
-def recommend_tracks_by_mood_tool(mood: str) -> list:
-    """Recommend tracks based on a mood."""
-    return recommend_tracks_by_mood(mood)
+def recommend_tracks_by_mood_tool(
+    mood: str,
+    target_energy: float = None,
+    target_valence: float = None,
+    target_danceability: float = None,
+    target_tempo: float = None,
+    target_acousticness: float = None
+) -> list:
+    """
+    Recommend tracks based on a mood.
+    Allows passing target audio features (energy, valence, danceability, tempo, acousticness) to fine-tune recommendations dynamically.
+    """
+    return recommend_tracks_by_mood(
+        mood=mood,
+        target_energy=target_energy,
+        target_valence=target_valence,
+        target_danceability=target_danceability,
+        target_tempo=target_tempo,
+        target_acousticness=target_acousticness
+    )
 
 @tool
 def create_playlist_tool(playlist_name: str) -> dict:

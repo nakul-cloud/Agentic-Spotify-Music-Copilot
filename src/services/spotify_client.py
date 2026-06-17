@@ -6,6 +6,23 @@ from src.utils.config import (
 
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
+
+
+def _create_retry_session():
+    session = requests.Session()
+    # Configure retry behavior with exponential backoff on 429 (Rate Limit) and 5xx errors
+    retries = Retry(
+        total=5,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        raise_on_status=False
+    )
+    session.mount("http://", HTTPAdapter(max_retries=retries))
+    session.mount("https://", HTTPAdapter(max_retries=retries))
+    return session
 
 
 def _require_credentials():
@@ -17,6 +34,7 @@ def _require_credentials():
 
 def get_spotify_client(user_auth: bool = False):
     _require_credentials()
+    session = _create_retry_session()
     if user_auth:
         return spotipy.Spotify(
             auth_manager=SpotifyOAuth(
@@ -26,7 +44,8 @@ def get_spotify_client(user_auth: bool = False):
                 scope="playlist-modify-public playlist-modify-private playlist-read-private playlist-read-collaborative",
                 open_browser=False
             ),
-            requests_timeout=10
+            requests_timeout=10,
+            requests_session=session
         )
     else:
         return spotipy.Spotify(
@@ -34,6 +53,7 @@ def get_spotify_client(user_auth: bool = False):
                 client_id=SPOTIFY_CLIENT_ID,
                 client_secret=SPOTIFY_CLIENT_SECRET
             ),
-            requests_timeout=10
+            requests_timeout=10,
+            requests_session=session
         )
 

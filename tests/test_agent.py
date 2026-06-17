@@ -213,6 +213,8 @@ def test_full_graph_workflow_no_tools():
 
 def test_memory_pipeline_integration():
     session_id = "test_memory_session_123"
+    from src.agent.nodes import memory_store
+    memory_store.clear(session_id)
     
     # 1. Mock the LLM preference extractor response
     mock_extractor_response = AIMessage(

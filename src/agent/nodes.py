@@ -294,7 +294,7 @@ def memory_retrieval_node(state: AgentState) -> AgentState:
     session_id = state.get("session_id", "default")
     
     # 1. Search memory collection
-    memories = memory_store.search_memories(user_query, limit=5)
+    memories = memory_store.search_memories(user_query, session_id=session_id, limit=5)
     
     # 2. Get user profile
     profile = memory_store.get_profile(session_id)
@@ -310,6 +310,21 @@ def memory_retrieval_node(state: AgentState) -> AgentState:
     }
 
 import json
+
+def extract_json(text: str) -> dict:
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Search for first '{' and last '}'
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1:
+            try:
+                return json.loads(text[start:end+1])
+            except Exception:
+                pass
+        raise
 
 @timed_node("memory_update_node")
 def memory_update_node(state: AgentState) -> AgentState:
@@ -342,8 +357,12 @@ def memory_update_node(state: AgentState) -> AgentState:
             content = content[:-3]
         content = content.strip()
         
-        updates = json.loads(content)
-        
+        try:
+            updates = extract_json(content)
+        except Exception as json_err:
+            LOGGER.warning("[NODE: memory_update_node] Failed parsing extracted JSON payload: %s", str(json_err))
+            updates = {"memories": [], "profile_updates": {}}
+            
         # 1. Persist new semantic memories
         new_memories = updates.get("memories", [])
         for memory in new_memories:

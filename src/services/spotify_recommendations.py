@@ -59,29 +59,40 @@ def recommend_tracks_by_artist(artist_name: str, limit: int = 10):
 def recommend_tracks_by_genre(genre: str, limit: int = 10):
     sp = get_spotify_client()
     available_genres = _get_recommendation_genres(sp)
-
-    if genre.lower() not in [g.lower() for g in available_genres]:
-        return {
-            "error": "Invalid genre. Use a Spotify seed genre.",
-            "genre": genre
-        }
-
-    try:
+    
+    genre_lower = genre.lower()
+    if genre_lower in [g.lower() for g in available_genres]:
         try:
-            recommendations = sp.recommendations(seed_genres=[genre.lower()], limit=limit)
+            recommendations = sp.recommendations(seed_genres=[genre_lower], limit=limit)
             tracks = recommendations.get("tracks", [])
             return [_build_track_summary(track) for track in tracks]
         except Exception as e:
             LOGGER.warning("Recommendations endpoint failed (%s). Falling back to search.", str(e))
-            # Fallback: search tracks by genre tag
-            search_res = sp.search(q=f"genre:{genre.lower()}", type="track", limit=limit)
+            
+    try:
+        # Fallback/Dynamic search if not a seed genre or endpoint failed
+        search_res = sp.search(q=f"genre:\"{genre}\"", type="track", limit=limit)
+        tracks = search_res.get("tracks", {}).get("items", [])
+        if not tracks:
+            search_res = sp.search(q=f"genre:{genre}", type="track", limit=limit)
             tracks = search_res.get("tracks", {}).get("items", [])
-            return [_build_track_summary(track) for track in tracks]
+        return [_build_track_summary(track) for track in tracks]
     except Exception as e:
         return {"error": f"Failed to recommend tracks: {str(e)}"}
 
 
-def recommend_tracks_by_mood(mood: str, limit: int = 10):
+def recommend_tracks_by_mood(
+    mood: str, 
+    limit: int = 10,
+    target_energy: float = None,
+    target_valence: float = None,
+    target_danceability: float = None,
+    target_tempo: float = None,
+    target_acousticness: float = None
+):
+    sp = get_spotify_client()
+    
+    # Common moods mapping as a guide/fallback
     mood_to_genres = {
         "happy": ["pop", "dance"],
         "sad": ["acoustic", "piano"],
@@ -91,31 +102,47 @@ def recommend_tracks_by_mood(mood: str, limit: int = 10):
         "party": ["party", "dance"],
         "driving": ["rock", "edm"]
     }
-
-    if mood not in mood_to_genres:
-        return {
-            "error": "Unsupported mood.",
-            "mood": mood,
-            "supported_moods": sorted(mood_to_genres.keys())
-        }
-
-    sp = get_spotify_client()
+    
+    seed_genres = ["pop"]
+    mood_lower = mood.lower()
+    
+    if mood_lower in mood_to_genres:
+        seed_genres = mood_to_genres[mood_lower]
+    else:
+        matched = False
+        for k, v in mood_to_genres.items():
+            if k in mood_lower or mood_lower in k:
+                seed_genres = v
+                matched = True
+                break
+        if not matched:
+            seed_genres = ["chill"]
+            
     try:
         available_genres = _get_recommendation_genres(sp)
-        seed_genres = [g for g in mood_to_genres[mood] if g in available_genres]
-
-        if not seed_genres:
-            seed_genres = [mood_to_genres[mood][0]]
-
+        resolved_seeds = [g for g in seed_genres if g in available_genres]
+        if not resolved_seeds:
+            resolved_seeds = ["chill"]
+            
+        kwargs = {}
+        if target_energy is not None:
+            kwargs["target_energy"] = target_energy
+        if target_valence is not None:
+            kwargs["target_valence"] = target_valence
+        if target_danceability is not None:
+            kwargs["target_danceability"] = target_danceability
+        if target_tempo is not None:
+            kwargs["target_tempo"] = target_tempo
+        if target_acousticness is not None:
+            kwargs["target_acousticness"] = target_acousticness
+            
         try:
-            recommendations = sp.recommendations(seed_genres=seed_genres[:2], limit=limit)
+            recommendations = sp.recommendations(seed_genres=resolved_seeds[:2], limit=limit, **kwargs)
             tracks = recommendations.get("tracks", [])
             return [_build_track_summary(track) for track in tracks]
         except Exception as e:
-            LOGGER.warning("Recommendations endpoint failed (%s). Falling back to mood-search.", str(e))
-            # Fallback: search using mood genre / keywords
-            query = f"genre:{seed_genres[0]}"
-            search_res = sp.search(q=query, type="track", limit=limit)
+            LOGGER.warning("Recommendations failed (%s). Falling back to search.", str(e))
+            search_res = sp.search(q=mood, type="track", limit=limit)
             tracks = search_res.get("tracks", {}).get("items", [])
             return [_build_track_summary(track) for track in tracks]
     except Exception as e:

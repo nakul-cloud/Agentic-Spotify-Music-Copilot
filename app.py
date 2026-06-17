@@ -96,14 +96,19 @@ st.sidebar.title("🎵 Spotify Copilot")
 st.sidebar.markdown("### Agent Settings")
 model_selection = st.sidebar.selectbox("LLM Orchestrator", ["llama-3.3-70b-versatile (Groq)"])
 
-# Keep input session linked to st.session_state["session_id"]
 session_input = st.sidebar.text_input("Session ID", value=st.session_state["session_id"])
 if session_input != st.session_state["session_id"]:
     st.session_state["session_id"] = session_input
-    # Clear conversation history for new session
     st.session_state["chat_history"] = []
     st.session_state["latest_trace"] = None
     st.session_state["latest_tool_traces"] = []
+
+if st.sidebar.button("🆕 New Session"):
+    st.session_state["session_id"] = str(uuid.uuid4())
+    st.session_state["chat_history"] = []
+    st.session_state["latest_trace"] = None
+    st.session_state["latest_tool_traces"] = []
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Suggested Prompts")

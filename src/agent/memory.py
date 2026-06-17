@@ -174,13 +174,15 @@ class QdrantMemoryStore(BaseMemoryStore):
         except Exception as e:
             LOGGER.error("Failed to add memory to Qdrant: %s", str(e))
 
-    def search_memories(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def search_memories(self, query: str, session_id: str = None, limit: int = 5) -> List[Dict[str, Any]]:
         """Semantic search query over Qdrant memory collection."""
         if not self.online:
             # Simple keyword match fallback for testing
             results = []
             q_lower = query.lower()
             for mem in self._local_memories:
+                if session_id and mem.get("session_id") != session_id:
+                    continue
                 if q_lower in mem["text"].lower() or any(q_lower in str(v).lower() for v in mem.get("metadata", {}).values()):
                     results.append(mem)
                 if len(results) >= limit:
@@ -188,9 +190,22 @@ class QdrantMemoryStore(BaseMemoryStore):
             return results
 
         try:
+            # Build query filter for session_id if provided
+            query_filter = None
+            if session_id:
+                query_filter = models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="session_id",
+                            match=models.MatchValue(value=session_id)
+                        )
+                    ]
+                )
+
             hits = self.client.query(
                 collection_name=self.collection_name,
                 query_text=query,
+                query_filter=query_filter,
                 limit=limit
             )
             return [hit.metadata for hit in hits if hit.metadata]
